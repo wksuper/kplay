@@ -54,19 +54,19 @@
 #define BLKGAIN_PARAMID_GAIN         (1)
 
 struct wav_header {
-	uint32_t riff_id;
-	uint32_t riff_sz;
-	uint32_t riff_fmt;
-	uint32_t fmt_id;
-	uint32_t fmt_sz;
-	uint16_t audio_format;
-	uint16_t num_channels;
-	uint32_t sample_rate;
-	uint32_t byte_rate;
-	uint16_t block_align;
-	uint16_t bits_per_sample;
-	uint32_t data_id;
-	uint32_t data_sz;
+    uint32_t riff_id;
+    uint32_t riff_sz;
+    uint32_t riff_fmt;
+    uint32_t fmt_id;
+    uint32_t fmt_sz;
+    uint16_t audio_format;
+    uint16_t num_channels;
+    uint32_t sample_rate;
+    uint32_t byte_rate;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
+    uint32_t data_id;
+    uint32_t data_sz;
 };
 
 enum Output { PORTAUDIO, ALSA, TINYALSA, STDOUT, NULLDEV };
@@ -98,41 +98,41 @@ private:
 WavFile::WavFile(const char *wavFileName)
     : m_fin(wavFileName, std::ifstream::binary), m_sampleSize(0)
 {
-	if (!m_fin) {
-		CONSOLE_PRINT("Unable to open %s", wavFileName);
-		return;
-	}
-
-	if (!m_fin.read((char *)&m_header, sizeof(m_header))) {
-		CONSOLE_PRINT("Unable to read riff/wave header");
+    if (!m_fin) {
+        CONSOLE_PRINT("Unable to open %s", wavFileName);
         return;
-	}
+    }
 
-	if ((m_header.riff_id != ID_RIFF) ||
-	    (m_header.riff_fmt != ID_WAVE)) {
-		CONSOLE_PRINT("Not a riff/wave header");
+    if (!m_fin.read((char *)&m_header, sizeof(m_header))) {
+        CONSOLE_PRINT("Unable to read riff/wave header");
         return;
-	}
+    }
+
+    if ((m_header.riff_id != ID_RIFF) ||
+            (m_header.riff_fmt != ID_WAVE)) {
+        CONSOLE_PRINT("Not a riff/wave header");
+        return;
+    }
 
     if (m_header.audio_format != FORMAT_PCM) {
-		CONSOLE_PRINT("Not PCM format");
+        CONSOLE_PRINT("Not PCM format");
         return;
     }
 
     if (memcmp(&m_header.data_id, "data", 4) != 0) {
-		CONSOLE_PRINT("No data chunk\n");
+        CONSOLE_PRINT("No data chunk");
         return;
     }
 
     if (m_header.num_channels > 2) {
-		CONSOLE_PRINT("Can't support %u channels\n", m_header.num_channels);
+        CONSOLE_PRINT("Can't support %u channels", m_header.num_channels);
         CONSOLE_PRINT("Mono and stereo are supported");
         return;
     }
 
     m_sampleSize = m_header.bits_per_sample / 8 * m_header.num_channels;
 
-	m_fin.seekg(sizeof(struct wav_header), std::ios::beg);
+    m_fin.seekg(sizeof(struct wav_header), std::ios::beg);
 }
 
 int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp)
@@ -166,10 +166,10 @@ private:
     {
         if (m_chNum == 2) {
             STATUS_PRINT("L-CH VOLUME: %-8g R-CH VOLUME: %-8g %s       PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
+                         m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
         } else {
             STATUS_PRINT("MONO-CH VOLUME: %-8g                    %s       PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
+                         m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
         }
     }
 
@@ -193,8 +193,8 @@ private:
 
 int Player::Go(int argc, char *argv[])
 {
-	if (argc < 2) {
-		CONSOLE_PRINT(
+    if (argc < 2) {
+        CONSOLE_PRINT(
             "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-v VOLUME] [-p PITCH] [-t TEMPO] WAVFILE\n"
             "\n"
             "Mandatory argument\n"
@@ -207,8 +207,8 @@ int Player::Go(int argc, char *argv[])
             "-v VOLUME                  The initial volume (default 1.0)\n"
             "-p PITCH                   The initial pitch (default 1.0)\n"
             "-t TEMPO                   The initial tempo (default 1.0)");
-		return 0;
-	}
+        return 0;
+    }
 
     int ch;
     std::string savingFile;
@@ -228,7 +228,7 @@ int Player::Go(int argc, char *argv[])
                 output = NULLDEV;
             } else {
                 CONSOLE_PRINT("Invalid -o argument: %s", optarg);
-                CONSOLE_PRINT("Supported -o arguments: portaudio, alsa, tinyalsa, stdout");
+                CONSOLE_PRINT("Supported -o arguments: portaudio, alsa, tinyalsa, stdout, null");
                 return -1;
             }
             break;
@@ -287,27 +287,27 @@ int Player::Go(int argc, char *argv[])
     }
 
     WavFile wav(argv[optind]);
-	if (!wav)
-		return -1;
+    if (!wav)
+        return -1;
 
     const struct wav_header &header = wav.Header();
     lark::SampleFormat format = lark::SampleFormat::BYTE;
-	switch (header.bits_per_sample) {
-	case 32:
+    switch (header.bits_per_sample) {
+    case 32:
         format = lark::SampleFormat_S32;
-		break;
-	case 24:
-		format = lark::SampleFormat_S24_3;
-		break;
-	case 16:
-		format = lark::SampleFormat_S16;
-		break;
-	default:
-		CONSOLE_PRINT("%u bits is not supported", header.bits_per_sample);
-		return -1;
-	}
+        break;
+    case 24:
+        format = lark::SampleFormat_S24_3;
+        break;
+    case 16:
+        format = lark::SampleFormat_S16;
+        break;
+    default:
+        CONSOLE_PRINT("%u bits is not supported", header.bits_per_sample);
+        return -1;
+    }
     m_chNum = header.num_channels;
-	const unsigned int rate = header.sample_rate;
+    const unsigned int rate = header.sample_rate;
     const lark::samples_t frameSizeInSamples = 20/*ms*/ * rate / 1000;
 
     // Disable lark logging to either stdout or stderr
