@@ -27,6 +27,8 @@
 #include <mutex>
 #include <cstring>
 
+static const char *__version = "0.1";
+
 #define CONSOLE_PRINT(...) kloga( \
     KLOGGING_TO_STDERR | KLOGGING_NO_TIMESTAMP | KLOGGING_NO_LOGTYPE | KLOGGING_NO_SOURCEFILE | KLOGGING_FLUSH_IMMEDIATELY, \
     KLOGGING_TO_STDOUT, NULL, __VA_ARGS__)
@@ -195,6 +197,10 @@ int Player::Go(int argc, char *argv[])
 {
     if (argc < 2) {
         CONSOLE_PRINT(
+            "kplay - A WAV File Player with Real-Time Sound Tuning | Version %s\n"
+            "\n"
+            "Copyright (C) 2022  Kui Wang\n"
+            "\n"
             "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-v VOLUME] [-p PITCH] [-t TEMPO] WAVFILE\n"
             "\n"
             "Mandatory argument\n"
@@ -206,7 +212,7 @@ int Player::Go(int argc, char *argv[])
             "-s SAVINGFILE              The file that audio will be saved to while playback\n"
             "-v VOLUME                  The initial volume (default 1.0)\n"
             "-p PITCH                   The initial pitch (default 1.0)\n"
-            "-t TEMPO                   The initial tempo (default 1.0)");
+            "-t TEMPO                   The initial tempo (default 1.0)", __version);
         return 0;
     }
 
