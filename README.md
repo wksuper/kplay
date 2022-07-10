@@ -18,10 +18,28 @@ Main features
 ## Dependency
 
 1. kplay is a lark-based application depending on the ***lark*** library. Visit <https://gitee.com/wksuper/lark-release> to get it installed first.
-2. The ***SoundTouch*** library is needed by kplay at runtime. Install it before running kplay.
+2. The ***SoundTouch*** library is needed by kplay at runtime.
 
 ```bash
 $ sudo apt-get install libsoundtouch-dev
+```
+
+3. If the option `-o portaudio` (default) is given to run kplay, then the ***portaudio*** library is needed.
+
+```bash
+$ sudo apt-get install libportaudio2
+```
+
+4. If the option `-o alsa` is given to run kplay, then the ***alsa-lib*** library is needed.
+
+```bash
+$ sudo apt-get install libasound2-dev
+```
+
+5. If the option `-o tinyalsa` is given to run kplay, then the ***tinyalsa-lib*** library is needed.
+
+```bash
+$ sudo apt-get install libtinyalsa-dev
 ```
 
 ## Build and Install

@@ -4,7 +4,7 @@
 
 ## 介绍
 
-kplay是一个纯控制台的wav文件播放器，可以实时调音。
+kplay是一个纯控制台的可以实时调音的wav文件播放器。
 
 主要功能：
 
@@ -18,10 +18,28 @@ kplay是一个纯控制台的wav文件播放器，可以实时调音。
 ## 依赖
 
 1. kplay是一个基于百灵鸟的应用，依赖于 ***百灵鸟*** 库。先访问<https://gitee.com/wksuper/lark-release>以安装之。
-2. kplay运行时需要 ***SoundTouch*** 库。运行kplay前要安装它。
+2. kplay运行时依赖于 ***SoundTouch*** 库。
 
 ```bash
 $ sudo apt-get install libsoundtouch-dev
+```
+
+3. 若使用`-o portaudio`（默认）选项运行kplay，则需要安装 ***portaudio*** 库。
+
+```bash
+$ sudo apt-get install libportaudio2
+```
+
+4. 若使用`-o alsa`选项运行kplay，则需要安装 ***alsa-lib*** 库。
+
+```bash
+$ sudo apt-get install libasound2-dev
+```
+
+5. 若使用`-o tinyalsa`选项运行kplay，则需要安装 ***tinyalsa-lib*** 库。
+
+```bash
+$ sudo apt-get install libtinyalsa-dev
 ```
 
 ## 编译和安装
