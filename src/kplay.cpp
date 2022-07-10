@@ -317,11 +317,11 @@ int Player::Go(int argc, char *argv[])
     const lark::samples_t frameSizeInSamples = 20/*ms*/ * rate / 1000;
 
     // Disable lark logging to either stdout or stderr
-    lark::Lark::Instance();
+    lark::Lark &lk = lark::Lark::Instance();
     KLOG_DISABLE_OPTIONS(KLOGGING_TO_STDOUT | KLOGGING_TO_STDERR);
 
     // Create the playback route named RouteA
-    lark::Route *route = lark::Lark::Instance().NewRoute("RouteA", this);
+    lark::Route *route = lk.NewRoute("RouteA", this);
     if (!route) {
         CONSOLE_PRINT("Failed to create route");
         return -1;
@@ -337,6 +337,7 @@ int Player::Go(int argc, char *argv[])
     lark::Block *blkStreamIn = route->NewBlock(soFileName, true, false, args);
     if (!blkStreamIn) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
 
@@ -344,6 +345,7 @@ int Player::Go(int argc, char *argv[])
     lark::Block *blkGain = route->NewBlock(soFileName, false, false);
     if (!blkGain) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
     args.clear();
@@ -362,6 +364,7 @@ int Player::Go(int argc, char *argv[])
         blkDeinterleave = route->NewBlock(soFileName, false, false);
         if (!blkDeinterleave) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+            lk.DeleteRoute(route);
             return -1;
         }
 
@@ -369,6 +372,7 @@ int Player::Go(int argc, char *argv[])
         blkInterleave = route->NewBlock(soFileName, false, false);
         if (!blkInterleave) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+            lk.DeleteRoute(route);
             return -1;
         }
     }
@@ -377,6 +381,7 @@ int Player::Go(int argc, char *argv[])
     lark::Block *blkFormatAdapter = route->NewBlock(soFileName, false, false);
     if (!blkFormatAdapter) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
 
@@ -384,6 +389,7 @@ int Player::Go(int argc, char *argv[])
     lark::Block *blkSoundTouch = route->NewBlock(soFileName, false, false);
     if (!blkSoundTouch) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
     args.clear();
@@ -397,6 +403,7 @@ int Player::Go(int argc, char *argv[])
     lark::Block *blkFormatAdapter1 = route->NewBlock(soFileName, false, false);
     if (!blkFormatAdapter1) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
 
@@ -427,55 +434,67 @@ int Player::Go(int argc, char *argv[])
         blkOutput = route->NewBlock(soFileName, false, true, args);
         break;
     default:
+        lk.DeleteRoute(route);
         return -1;
     }
     if (!blkOutput) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
         return -1;
     }
 
     // Create RouteA's links
     if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFormatAdapter, 0)) {
         CONSOLE_PRINT("Failed to new a link");
+        lk.DeleteRoute(route);
         return -1;
     }
     if (m_chNum == 2) { // stereo
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFormatAdapter, 0, blkDeinterleave, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 0, blkGain, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 1, blkGain, 1)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 0, blkInterleave, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 1, blkInterleave, 1)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkInterleave, 0, blkSoundTouch, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
     } else { // mono
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkFormatAdapter, 0, blkGain, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 0, blkSoundTouch, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
     }
     if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkSoundTouch, 0, blkFormatAdapter1, 0)) {
         CONSOLE_PRINT("Failed to new a link");
+        lk.DeleteRoute(route);
         return -1;
     }
 
@@ -486,6 +505,7 @@ int Player::Go(int argc, char *argv[])
         lark::Block *blkFileWriter = route->NewBlock(soFileName, false, true, args);
         if (!blkFileWriter) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+            lk.DeleteRoute(route);
             return -1;
         }
 
@@ -493,24 +513,29 @@ int Player::Go(int argc, char *argv[])
         lark::Block *blkDuplicator = route->NewBlock(soFileName, false, false);
         if (!blkDuplicator) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+            lk.DeleteRoute(route);
             return -1;
         }
 
         if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkDuplicator, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
         if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 1, blkFileWriter, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
     } else {
         if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
+            lk.DeleteRoute(route);
             return -1;
         }
     }
@@ -541,6 +566,7 @@ int Player::Go(int argc, char *argv[])
     // Start
     if (route->Start() < 0) {
         CONSOLE_PRINT("Failed to start route");
+        lk.DeleteRoute(route);
         return -1;
     }
 
@@ -698,7 +724,7 @@ int Player::Go(int argc, char *argv[])
         }
     }
 
-    lark::Lark::Instance().DeleteRoute(route);
+    lk.DeleteRoute(route);
 
     CONSOLE_PRINT("");
 
