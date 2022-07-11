@@ -161,8 +161,8 @@ public:
     int Go(int argc, char *argv[]);
 
 private:
-    virtual void OnStarted(lark::Route *route) override;
-    virtual void OnStopped(lark::Route *route) override;
+    virtual void OnStarted() override;
+    virtual void OnStopped(lark::Route::StopReason reason) override;
 
     inline void RefreshDisplay() const
     {
@@ -731,13 +731,13 @@ int Player::Go(int argc, char *argv[])
     return 0;
 }
 
-void Player::OnStarted(lark::Route *route)
+void Player::OnStarted()
 {
     m_routeStatus = "PLAYING";
     this->RefreshDisplay();
 }
 
-void Player::OnStopped(lark::Route *route)
+void Player::OnStopped(lark::Route::StopReason reason)
 {
     m_routeStatus = "STOPPED";
     this->RefreshDisplay();
