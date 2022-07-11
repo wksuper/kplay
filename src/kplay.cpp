@@ -20,7 +20,7 @@
  */
 
 #include <lark/lark.h>
-#include <cstdio>
+#include <klogging.h>
 #include <unistd.h>
 #include <termios.h>
 #include <fstream>
@@ -75,7 +75,7 @@ enum Output { PORTAUDIO, ALSA, TINYALSA, STDOUT, NULLDEV };
 
 class WavFile : public lark::DataProducer {
 public:
-    WavFile(const char *wavFileName);
+    int Open(const char *wavFileName);
     void SeekToBegin();
 
     operator bool() const
@@ -93,48 +93,50 @@ private:
 
     std::ifstream m_fin;
     struct wav_header m_header;
-    size_t m_sampleSize;
+    size_t m_sampleSize = 0;
     std::mutex m_mutex;
 };
 
-WavFile::WavFile(const char *wavFileName)
-    : m_fin(wavFileName, std::ifstream::binary), m_sampleSize(0)
+int WavFile::Open(const char *wavFileName)
 {
+    m_fin.open(wavFileName, std::ifstream::binary);
     if (!m_fin) {
         CONSOLE_PRINT("Unable to open %s", wavFileName);
-        return;
+        return -1;
     }
 
     if (!m_fin.read((char *)&m_header, sizeof(m_header))) {
         CONSOLE_PRINT("Unable to read riff/wave header");
-        return;
+        return -1;
     }
 
     if ((m_header.riff_id != ID_RIFF) ||
             (m_header.riff_fmt != ID_WAVE)) {
         CONSOLE_PRINT("Not a riff/wave header");
-        return;
+        return -1;
     }
 
     if (m_header.audio_format != FORMAT_PCM) {
         CONSOLE_PRINT("Not PCM format");
-        return;
+        return -1;
     }
 
     if (memcmp(&m_header.data_id, "data", 4) != 0) {
         CONSOLE_PRINT("No data chunk");
-        return;
+        return -1;
     }
 
     if (m_header.num_channels > 2) {
         CONSOLE_PRINT("Can't support %u channels", m_header.num_channels);
         CONSOLE_PRINT("Mono and stereo are supported");
-        return;
+        return -1;
     }
 
     m_sampleSize = m_header.bits_per_sample / 8 * m_header.num_channels;
 
     m_fin.seekg(sizeof(struct wav_header), std::ios::beg);
+
+    return 0;
 }
 
 int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp)
@@ -167,13 +169,23 @@ private:
     inline void RefreshDisplay() const
     {
         if (m_chNum == 2) {
-            STATUS_PRINT("L-CH VOLUME: %-8g R-CH VOLUME: %-8g %s       PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                         m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
+            STATUS_PRINT("L-CH VOLUME: %-8g R-CH VOLUME: %-8g %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s ",
+                         m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString());
         } else {
-            STATUS_PRINT("MONO-CH VOLUME: %-8g                    %s       PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                         m_volMaster, m_mute ? "MUTED" : "     ", m_pitch, m_tempo, m_routeStatus);
+            STATUS_PRINT("MONO-CH VOLUME: %-8g                    %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s ",
+                         m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString());
         }
     }
+
+    inline const char *StateString() const
+    {
+        static const char *tbl[] = {
+            "STOPPED", "PLAYING"
+        };
+        return tbl[m_state];
+    }
+
+    WavFile m_wav;
 
     double m_pitch = 1.0;
     const double PITCH_MIN = 0.1;
@@ -190,7 +202,11 @@ private:
     bool m_mute = false;
 
     unsigned int m_chNum = 0;
-    const char *m_routeStatus = nullptr;
+
+    enum State { STOPPED, PLAYING };
+    State m_state = STOPPED;
+
+    std::mutex m_mutex;
 };
 
 int Player::Go(int argc, char *argv[])
@@ -216,10 +232,9 @@ int Player::Go(int argc, char *argv[])
         return 0;
     }
 
-    int ch;
     std::string savingFile;
     Output output = PORTAUDIO;
-    while ((ch = getopt(argc, argv, "o:s:v:p:t:")) != -1) {
+    for (int ch = -1; (ch = getopt(argc, argv, "o:s:rv:p:t:")) != -1; ) {
         switch (ch) {
         case 'o':
             if (strcmp(optarg, "stdout") == 0) {
@@ -292,11 +307,11 @@ int Player::Go(int argc, char *argv[])
         return -1;
     }
 
-    WavFile wav(argv[optind]);
-    if (!wav)
-        return -1;
+    int ret = m_wav.Open(argv[optind]);
+    if (ret < 0)
+        return ret;
 
-    const struct wav_header &header = wav.Header();
+    const struct wav_header &header = m_wav.Header();
     lark::SampleFormat format = lark::SampleFormat::BYTE;
     switch (header.bits_per_sample) {
     case 32:
@@ -330,7 +345,7 @@ int Player::Go(int argc, char *argv[])
     // Create RouteA's blocks
     const char *soFileName = "libblkstreamin" SUFFIX;
     lark::Parameters args;
-    lark::DataProducer *producer = &wav;
+    lark::DataProducer *producer = &m_wav;
     producer->SetBlocking(true);
     args.clear();
     args.push_back(std::to_string((unsigned long)producer));
@@ -542,18 +557,18 @@ int Player::Go(int argc, char *argv[])
 
     if (m_chNum == 2) {
         CONSOLE_PRINT(
-            "*****************************************************************************************************\n"
-            "* [q] Balance Left  [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
-            "* [a] Volume Down   [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
-            "* [z] Re-start      [x] Stop         [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
-            "*****************************************************************************************************");
+            "******************************************************************************************************\n"
+            "* [q] Balance Left   [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
+            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
+            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
+            "******************************************************************************************************");
     } else {
         CONSOLE_PRINT(
-            "*****************************************************************************************************\n"
-            "*                                                       [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
-            "* [a] Volume Down   [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
-            "* [z] Re-start      [x] Stop         [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
-            "*****************************************************************************************************");
+            "******************************************************************************************************\n"
+            "*                                                        [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
+            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
+            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
+            "******************************************************************************************************");
     }
 
     struct termios attr;
@@ -572,17 +587,35 @@ int Player::Go(int argc, char *argv[])
 
     while (1) {
         this->RefreshDisplay();
-        int c = getchar();
-        if (c == 'c')  // Exit
+
+        int key = getchar();
+
+        if (key == 'c') // Exit
             break;
-        switch (c) {
-        case 'x':  // Stop
-            route->Stop();
+
+        switch (key) {
+        case 'z':  // Seek to Begin
+            m_wav.SeekToBegin();
             break;
-        case 'z':  // Re-start
-            wav.SeekToBegin();
-            route->Start();
+
+        case 'x': { // Play/Stop
+            bool toPlay = false;
+
+            m_mutex.lock();
+            if (m_state == STOPPED) {
+                toPlay = true;
+            } else if (m_state == PLAYING) {
+                toPlay = false;
+            }
+            m_mutex.unlock();
+            if (toPlay) {
+                route->Start();
+            } else {
+                route->Stop();
+            }
             break;
+        }
+
         case 'r':  // Pitch High
             if (m_pitch >= PITCH_MAX)
                 break;
@@ -591,6 +624,7 @@ int Player::Go(int argc, char *argv[])
             args.push_back(std::to_string(m_pitch));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
             break;
+
         case 'f':  // Pitch Low
             if (m_pitch <= PITCH_MIN)
                 break;
@@ -599,12 +633,14 @@ int Player::Go(int argc, char *argv[])
             args.push_back(std::to_string(m_pitch));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
             break;
+
         case 'v':  // Pitch Reset
             m_pitch = 1.0;
             args.clear();
             args.push_back(std::to_string(m_pitch));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
             break;
+
         case 't':  // Tempo Fast
             if (m_tempo >= TEMPO_MAX)
                 break;
@@ -613,6 +649,7 @@ int Player::Go(int argc, char *argv[])
             args.push_back(std::to_string(m_tempo));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
             break;
+
         case 'g':  // Tempo Slow
             if (m_tempo <= TEMPO_MIN)
                 break;
@@ -621,12 +658,14 @@ int Player::Go(int argc, char *argv[])
             args.push_back(std::to_string(m_tempo));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
             break;
+
         case 'b':  // Tempo Reset
             m_tempo = 1.0;
             args.clear();
             args.push_back(std::to_string(m_tempo));
             route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
             break;
+
         case 'e':  // Balance Right
             if (m_chNum == 1)
                 break;
@@ -646,6 +685,7 @@ int Player::Go(int argc, char *argv[])
                 route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             }
             break;
+
         case 'q':  // Balance Left
             if (m_chNum == 1)
                 break;
@@ -665,6 +705,7 @@ int Player::Go(int argc, char *argv[])
                 route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             }
             break;
+
         case 'w':  // Balance Mid
             if (m_chNum == 1)
                 break;
@@ -680,6 +721,7 @@ int Player::Go(int argc, char *argv[])
             }
             route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             break;
+
         case 'd':  // Mute/Unmute
             m_mute = !m_mute;
             args.clear();
@@ -691,6 +733,7 @@ int Player::Go(int argc, char *argv[])
             }
             route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             break;
+
         case 'a':  // Volume Down
             if (m_volMaster == 0.0)
                 break;
@@ -705,6 +748,7 @@ int Player::Go(int argc, char *argv[])
             }
             route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             break;
+
         case 's':  // Volume Up
             if (m_volMaster == 1.0)
                 break;
@@ -719,6 +763,7 @@ int Player::Go(int argc, char *argv[])
             }
             route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
             break;
+
         default:
             break;
         }
@@ -733,14 +778,29 @@ int Player::Go(int argc, char *argv[])
 
 void Player::OnStarted()
 {
-    m_routeStatus = "PLAYING";
+    // Triggered from user
+    // No lock needed
+    m_state = PLAYING;
     this->RefreshDisplay();
 }
 
 void Player::OnStopped(lark::Route::StopReason reason)
 {
-    m_routeStatus = "STOPPED";
+    if (reason != lark::Route::USER_STOP) { // Triggered from lark route
+        m_mutex.lock();
+    } else { // Triggered from user
+        // No lock needed
+    }
+
+    m_state = STOPPED;
     this->RefreshDisplay();
+
+    if (reason != lark::Route::USER_STOP) { // Triggered from lark route
+        m_wav.SeekToBegin();
+        m_mutex.unlock();
+    } else { // Triggered from user
+        // No unlock needed
+    }
 }
 
 int main(int argc, char *argv[])
