@@ -27,7 +27,7 @@
 #include <mutex>
 #include <cstring>
 
-static const char *__version = "0.1";
+static const char *__version = "0.2";
 
 #define CONSOLE_PRINT(...) kloga( \
     KLOGGING_TO_STDERR | KLOGGING_NO_TIMESTAMP | KLOGGING_NO_LOGTYPE | KLOGGING_NO_SOURCEFILE | KLOGGING_FLUSH_IMMEDIATELY, \
