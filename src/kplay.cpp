@@ -51,10 +51,6 @@ static const char *__version = "0.2";
 #define ID_DATA 0x61746164
 #define FORMAT_PCM 1
 
-#define BLKSOUNDTOUCH_PARAMID_PITCH  (1)
-#define BLKSOUNDTOUCH_PARAMID_TEMPO  (2)
-#define BLKGAIN_PARAMID_GAIN         (1)
-
 struct wav_header {
     uint32_t riff_id;
     uint32_t riff_sz;
@@ -356,6 +352,17 @@ int Player::Go(int argc, char *argv[])
         return -1;
     }
 
+    soFileName = "libblkfadein" SUFFIX;
+    lark::Block *blkFadeIn = route->NewBlock(soFileName, false, false);
+    if (!blkFadeIn) {
+        CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
+        return -1;
+    }
+    args.clear();
+    args.push_back(std::to_string(0.5)); // 0.5s to fade in
+    route->SetParameter(blkFadeIn, BLKFADEIN_PARAMID_FADING_TIME, args);
+
     soFileName = "libblkgain" SUFFIX;
     lark::Block *blkGain = route->NewBlock(soFileName, false, false);
     if (!blkGain) {
@@ -422,6 +429,17 @@ int Player::Go(int argc, char *argv[])
         return -1;
     }
 
+    soFileName = "libblkfadeout" SUFFIX;
+    lark::Block *blkFadeOut = route->NewBlock(soFileName, false, false);
+    if (!blkFadeOut) {
+        CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+        lk.DeleteRoute(route);
+        return -1;
+    }
+    args.clear();
+    args.push_back(std::to_string(0.2)); // 0.2s to fade out
+    route->SetParameter(blkFadeOut, BLKFADEOUT_PARAMID_FADING_TIME, args);
+
     lark::Block *blkOutput = nullptr;
     switch (output) {
     case PORTAUDIO:
@@ -459,7 +477,12 @@ int Player::Go(int argc, char *argv[])
     }
 
     // Create RouteA's links
-    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFormatAdapter, 0)) {
+    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFadeIn, 0)) {
+        CONSOLE_PRINT("Failed to new a link");
+        lk.DeleteRoute(route);
+        return -1;
+    }
+    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeIn, 0, blkFormatAdapter, 0)) {
         CONSOLE_PRINT("Failed to new a link");
         lk.DeleteRoute(route);
         return -1;
@@ -512,6 +535,11 @@ int Player::Go(int argc, char *argv[])
         lk.DeleteRoute(route);
         return -1;
     }
+    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkFadeOut, 0)) {
+        CONSOLE_PRINT("Failed to new a link");
+        lk.DeleteRoute(route);
+        return -1;
+    }
 
     if (savingFile != "") {
         soFileName = "libblkfilewriter" SUFFIX;
@@ -532,7 +560,7 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
 
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkDuplicator, 0)) {
+        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkDuplicator, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
@@ -548,7 +576,7 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
     } else {
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkOutput, 0)) {
+        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
@@ -611,7 +639,8 @@ int Player::Go(int argc, char *argv[])
             if (toPlay) {
                 route->Start();
             } else {
-                route->Stop();
+                args.clear();
+                route->SetParameter(blkFadeOut, BLKFADEOUT_PARAMID_TRIGGER_FADING, args);
             }
             break;
         }
