@@ -477,18 +477,18 @@ int Player::Go(int argc, char *argv[])
     }
 
     // Create RouteA's links
-    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFadeIn, 0)) {
+    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFormatAdapter, 0)) {
         CONSOLE_PRINT("Failed to new a link");
         lk.DeleteRoute(route);
         return -1;
     }
-    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeIn, 0, blkFormatAdapter, 0)) {
+    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFormatAdapter, 0, blkFadeIn, 0)) {
         CONSOLE_PRINT("Failed to new a link");
         lk.DeleteRoute(route);
         return -1;
     }
     if (m_chNum == 2) { // stereo
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFormatAdapter, 0, blkDeinterleave, 0)) {
+        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFadeIn, 0, blkDeinterleave, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
@@ -519,7 +519,7 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
     } else { // mono
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkFormatAdapter, 0, blkGain, 0)) {
+        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkFadeIn, 0, blkGain, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
@@ -530,12 +530,12 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
     }
-    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkSoundTouch, 0, blkFormatAdapter1, 0)) {
+    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkSoundTouch, 0, blkFadeOut, 0)) {
         CONSOLE_PRINT("Failed to new a link");
         lk.DeleteRoute(route);
         return -1;
     }
-    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkFadeOut, 0)) {
+    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkFormatAdapter1, 0)) {
         CONSOLE_PRINT("Failed to new a link");
         lk.DeleteRoute(route);
         return -1;
@@ -560,7 +560,7 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
 
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkDuplicator, 0)) {
+        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkDuplicator, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
@@ -576,7 +576,7 @@ int Player::Go(int argc, char *argv[])
             return -1;
         }
     } else {
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkOutput, 0)) {
+        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
             lk.DeleteRoute(route);
             return -1;
