@@ -69,8 +69,14 @@ struct wav_header {
 
 enum Output { PORTAUDIO, ALSA, TINYALSA, STDOUT, NULLDEV };
 
+class Player;
+
 class WavFile : public lark::DataProducer {
 public:
+    WavFile(Player *player) : m_player(player)
+    {
+        memset(&m_header, 0, sizeof(m_header));
+    }
     int Open(const char *wavFileName);
     void SeekToBegin();
 
@@ -88,9 +94,11 @@ private:
     virtual int Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp) override;
 
     std::ifstream m_fin;
+    long m_pcmBytes = 0;
     struct wav_header m_header;
     size_t m_sampleSize = 0;
     std::mutex m_mutex;
+    Player *m_player;
 };
 
 int WavFile::Open(const char *wavFileName)
@@ -130,21 +138,13 @@ int WavFile::Open(const char *wavFileName)
 
     m_sampleSize = m_header.bits_per_sample / 8 * m_header.num_channels;
 
+	m_fin.seekg(0, std::ios::end);
+    long cur = m_fin.tellg();
+	m_pcmBytes = cur - sizeof(struct wav_header);
+
     m_fin.seekg(sizeof(struct wav_header), std::ios::beg);
 
     return 0;
-}
-
-int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp)
-{
-    if (timestamp)
-        *timestamp = -1;
-
-    std::lock_guard<std::mutex> _l(m_mutex);
-    if (m_fin.read((char *)data, m_sampleSize * samples))
-        return samples;
-    else
-        return lark::E_EOF;
 }
 
 void WavFile::SeekToBegin()
@@ -156,22 +156,34 @@ void WavFile::SeekToBegin()
 
 class Player : public lark::Route::Callbacks {
 public:
+    Player() : m_wav(this) { }
     int Go(int argc, char *argv[]);
+
+    inline void RefreshDisplay(long progress) const
+    {
+        static long s_progress;
+
+        if (progress >= 0)
+            s_progress = progress;
+        char prog[8];
+        if (s_progress == 0 || s_progress == 10000) {
+            snprintf(prog, sizeof(prog), "%5lu%%", s_progress / 100);
+        } else {
+            snprintf(prog, sizeof(prog), "%2lu.%02lu%%", s_progress / 100, s_progress % 100);
+        }
+
+        if (m_chNum == 2) {
+            STATUS_PRINT("L-CH VOLUME: %-8g R-CH VOLUME: %-8g %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s %s ",
+                m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString(), prog);
+        } else {
+            STATUS_PRINT("MONO-CH VOLUME: %-8g                    %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s %s ",
+                         m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString(), prog);
+        }
+    }
 
 private:
     virtual void OnStarted() override;
     virtual void OnStopped(lark::Route::StopReason reason) override;
-
-    inline void RefreshDisplay() const
-    {
-        if (m_chNum == 2) {
-            STATUS_PRINT("L-CH VOLUME: %-8g R-CH VOLUME: %-8g %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                         m_volL * m_volMaster, m_volR * m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString());
-        } else {
-            STATUS_PRINT("MONO-CH VOLUME: %-8g                    %-10s   PITCH: %-8g  TEMPO: %-8g    %-7s ",
-                         m_volMaster, m_mute ? "MUTED" : "", m_pitch, m_tempo, StateString());
-        }
-    }
 
     inline const char *StateString() const
     {
@@ -204,6 +216,23 @@ private:
 
     std::mutex m_mutex;
 };
+
+int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp)
+{
+    if (timestamp)
+        *timestamp = -1;
+
+    long cur = m_fin.tellg();
+    m_player->RefreshDisplay((cur - sizeof(struct wav_header)) * 10000 / m_pcmBytes);
+
+    std::lock_guard<std::mutex> _l(m_mutex);
+    if (m_fin.read((char *)data, m_sampleSize * samples))
+        return samples;
+    else {
+        m_player->RefreshDisplay(10000);
+        return lark::E_EOF;
+    }
+}
 
 int Player::Go(int argc, char *argv[])
 {
@@ -585,18 +614,18 @@ int Player::Go(int argc, char *argv[])
 
     if (m_chNum == 2) {
         CONSOLE_PRINT(
-            "******************************************************************************************************\n"
-            "* [q] Balance Left   [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
-            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
-            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
-            "******************************************************************************************************");
+            "*************************************************************************************************************\n"
+            "* [q] Balance Left   [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
+            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
+            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
+            "*************************************************************************************************************");
     } else {
         CONSOLE_PRINT(
-            "******************************************************************************************************\n"
-            "*                                                        [r] Pitch High   [t] Tempo Fast   |  KPLAY  *\n"
-            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow   | POWERED *\n"
-            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset  | BY LARK *\n"
-            "******************************************************************************************************");
+            "*************************************************************************************************************\n"
+            "*                                                        [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
+            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
+            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
+            "*************************************************************************************************************");
     }
 
     struct termios attr;
@@ -614,7 +643,7 @@ int Player::Go(int argc, char *argv[])
     }
 
     while (1) {
-        this->RefreshDisplay();
+        this->RefreshDisplay(-1);
 
         int key = getchar();
 
@@ -810,7 +839,7 @@ void Player::OnStarted()
     // Triggered from user
     // No lock needed
     m_state = PLAYING;
-    this->RefreshDisplay();
+    this->RefreshDisplay(-1);
 }
 
 void Player::OnStopped(lark::Route::StopReason reason)
@@ -822,7 +851,7 @@ void Player::OnStopped(lark::Route::StopReason reason)
     }
 
     m_state = STOPPED;
-    this->RefreshDisplay();
+    this->RefreshDisplay(-1);
 
     if (reason != lark::Route::USER_STOP) { // Triggered from lark route
         m_wav.SeekToBegin();
