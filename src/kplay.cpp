@@ -28,7 +28,7 @@
 #include <cstring>
 #include <thread>
 
-static const char *__version = "0.2";
+static const char *__version = "0.3";
 static bool s_silent = false;
 
 #define CONSOLE_PRINT(...) if (!s_silent) kloga( \
