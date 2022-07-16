@@ -29,12 +29,13 @@
 #include <thread>
 
 static const char *__version = "0.2";
+static bool s_silent = false;
 
-#define CONSOLE_PRINT(...) kloga( \
+#define CONSOLE_PRINT(...) if (!s_silent) kloga( \
     KLOGGING_TO_STDERR | KLOGGING_NO_TIMESTAMP | KLOGGING_NO_LOGTYPE | KLOGGING_NO_SOURCEFILE | KLOGGING_FLUSH_IMMEDIATELY, \
     KLOGGING_TO_STDOUT, NULL, __VA_ARGS__)
 
-#define STATUS_PRINT(...) kloga( \
+#define STATUS_PRINT(...) if (!s_silent) kloga( \
     KLOGGING_TO_STDERR | KLOGGING_NO_TIMESTAMP | KLOGGING_NO_LOGTYPE | KLOGGING_NO_SOURCEFILE | KLOGGING_FLUSH_IMMEDIATELY, \
     KLOGGING_TO_STDOUT, "", "\r" __VA_ARGS__)
 
@@ -464,7 +465,7 @@ void Player::Usage() const
         "\n"
         "Copyright (C) 2022  Kui Wang\n"
         "\n"
-        "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-m MODE] [-v VOLUME] [-p PITCH] [-t TEMPO] [-h] WAVFILE\n"
+        "Usage: kplay [-o OUTPUT] [-f SAVINGFILE] [-m MODE] [-s] [-v VOLUME] [-p PITCH] [-t TEMPO] [-h] WAVFILE\n"
         "\n"
         "Mandatory argument\n"
         "WAVFILE                    The wav file to play\n"
@@ -472,11 +473,12 @@ void Player::Usage() const
         "Optional arguments\n"
         "-o OUTPUT                  One of portaudio|alsa|tinyalsa|stdout|null\n"
         "                           that audio will output to (default portaudio)\n"
-        "-s SAVINGFILE              The file that audio will be saved to while playback\n"
+        "-f SAVINGFILE              The file that audio will be saved to while playback\n"
         "-m MODE                    One of normal|repeat|noninteractive (default normal)\n"
         "                               normal: stop playback when reach EOF\n"
         "                               repeat: re-start playback when reach EOF\n"
         "                               noninteractive: ignore user keys and exit program when reach EOF\n"
+        "-s                         Silent logging\n"
         "-v VOLUME                  The initial volume (default 1.0)\n"
         "-p PITCH                   The initial pitch (default 1.0)\n"
         "-t TEMPO                   The initial tempo (default 1.0)\n"
@@ -492,7 +494,7 @@ int Player::Go(int argc, char *argv[])
 
     std::string savingFile;
     Output output = PORTAUDIO;
-    for (int ch = -1; (ch = getopt(argc, argv, "o:s:m:v:p:t:h")) != -1; ) {
+    for (int ch = -1; (ch = getopt(argc, argv, "o:f:m:sv:p:t:h")) != -1; ) {
         switch (ch) {
         case 'o':
             if (strcmp(optarg, "stdout") == 0) {
@@ -510,7 +512,7 @@ int Player::Go(int argc, char *argv[])
                 return -1;
             }
             break;
-        case 's':
+        case 'f':
             savingFile = optarg;
             break;
         case 'm':
@@ -524,6 +526,9 @@ int Player::Go(int argc, char *argv[])
                 CONSOLE_PRINT("Invalid -m argument: %s", optarg);
                 return -1;
             }
+            break;
+        case 's':
+            s_silent = true;
             break;
         case 'v':
             m_volMaster = atof(optarg);
