@@ -138,9 +138,9 @@ int WavFile::Open(const char *wavFileName)
 
     m_sampleSize = m_header.bits_per_sample / 8 * m_header.num_channels;
 
-	m_fin.seekg(0, std::ios::end);
+    m_fin.seekg(0, std::ios::end);
     long cur = m_fin.tellg();
-	m_pcmBytes = cur - sizeof(struct wav_header);
+    m_pcmBytes = cur - sizeof(struct wav_header);
 
     m_fin.seekg(sizeof(struct wav_header), std::ios::beg);
 
@@ -182,6 +182,7 @@ public:
     }
 
 private:
+    void Usage() const;
     virtual void OnStarted() override;
     virtual void OnStopped(lark::Route::StopReason reason) override;
 
@@ -234,32 +235,38 @@ int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t
     }
 }
 
+void Player::Usage() const
+{
+    CONSOLE_PRINT(
+        "kplay - A WAV File Player with Real-Time Sound Tuning | Version %s\n"
+        "\n"
+        "Copyright (C) 2022  Kui Wang\n"
+        "\n"
+        "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-v VOLUME] [-p PITCH] [-t TEMPO] [-h] WAVFILE\n"
+        "\n"
+        "Mandatory argument\n"
+        "WAVFILE                    The wav file to play\n"
+        "\n"
+        "Optional arguments\n"
+        "-o OUTPUT                  One of portaudio|alsa|tinyalsa|stdout|null\n"
+        "                           that audio will output to (default portaudio)\n"
+        "-s SAVINGFILE              The file that audio will be saved to while playback\n"
+        "-v VOLUME                  The initial volume (default 1.0)\n"
+        "-p PITCH                   The initial pitch (default 1.0)\n"
+        "-t TEMPO                   The initial tempo (default 1.0)\n"
+        "-h                         Display version and usage information", __version);
+}
+
 int Player::Go(int argc, char *argv[])
 {
     if (argc < 2) {
-        CONSOLE_PRINT(
-            "kplay - A WAV File Player with Real-Time Sound Tuning | Version %s\n"
-            "\n"
-            "Copyright (C) 2022  Kui Wang\n"
-            "\n"
-            "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-v VOLUME] [-p PITCH] [-t TEMPO] WAVFILE\n"
-            "\n"
-            "Mandatory argument\n"
-            "WAVFILE                    The wav file to play\n"
-            "\n"
-            "Optional arguments\n"
-            "-o OUTPUT                  One of portaudio|alsa|tinyalsa|stdout|null\n"
-            "                           that audio will output to (default portaudio)\n"
-            "-s SAVINGFILE              The file that audio will be saved to while playback\n"
-            "-v VOLUME                  The initial volume (default 1.0)\n"
-            "-p PITCH                   The initial pitch (default 1.0)\n"
-            "-t TEMPO                   The initial tempo (default 1.0)", __version);
+        Usage();
         return 0;
     }
 
     std::string savingFile;
     Output output = PORTAUDIO;
-    for (int ch = -1; (ch = getopt(argc, argv, "o:s:rv:p:t:")) != -1; ) {
+    for (int ch = -1; (ch = getopt(argc, argv, "o:s:v:p:t:h")) != -1; ) {
         switch (ch) {
         case 'o':
             if (strcmp(optarg, "stdout") == 0) {
@@ -322,6 +329,9 @@ int Player::Go(int argc, char *argv[])
                 m_tempo = TEMPO_MIN;
             }
             break;
+        case 'h':
+            Usage();
+            return 0;
         default:
             break;
         }
