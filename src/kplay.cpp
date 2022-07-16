@@ -26,6 +26,7 @@
 #include <fstream>
 #include <mutex>
 #include <cstring>
+#include <thread>
 
 static const char *__version = "0.2";
 
@@ -159,7 +160,7 @@ public:
     Player() : m_wav(this) { }
     int Go(int argc, char *argv[]);
 
-    inline void RefreshDisplay(long progress) const
+    void RefreshDisplay(long progress) const
     {
         static long s_progress;
 
@@ -215,7 +216,19 @@ private:
     enum State { STOPPED, PLAYING };
     State m_state = STOPPED;
 
-    std::mutex m_mutex;
+    struct Message {
+        enum ID { ON_KEY, ON_STOPPED, ON_STARTED };
+        ID id;
+        char key;
+    };
+    static void MessageHandler(Player *player);
+    void MsgHdl();
+
+    lark::FIFO *m_msgQ = nullptr;
+    lark::Route *m_route = nullptr;
+    lark::Block *m_blkSoundTouch = nullptr;
+    lark::Block *m_blkGain = nullptr;
+    lark::Block *m_blkFadeOut = nullptr;
 };
 
 int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t *timestamp)
@@ -223,12 +236,13 @@ int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t
     if (timestamp)
         *timestamp = -1;
 
-    long cur = m_fin.tellg();
-    m_player->RefreshDisplay((cur - sizeof(struct wav_header)) * 10000 / m_pcmBytes);
-
     const size_t requestBytes = m_sampleSize * samples;
 
     std::lock_guard<std::mutex> _l(m_mutex);
+
+    long cur = m_fin.tellg();
+    m_player->RefreshDisplay((cur - sizeof(struct wav_header)) * 10000 / m_pcmBytes);
+
     if (m_fin.read((char *)data, requestBytes))
         return samples;
     else {
@@ -242,6 +256,202 @@ int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t
             return lark::E_EOF;
         }
     }
+}
+
+void Player::MsgHdl()
+{
+    lark::Parameters args;
+
+    while (1) {
+        this->RefreshDisplay(-1);
+
+        Message msg;
+        m_msgQ->Produce(&msg, 1, nullptr);
+
+        if (msg.id == Message::ON_KEY) {
+            if (msg.key == 'c') // Exit
+                break;
+
+            switch (msg.key) {
+            case 'z':  // Seek to Begin
+                m_wav.SeekToBegin();
+                break;
+
+            case 'x':  // Play/Stop
+                if (m_state == STOPPED) {
+                    m_route->Start();
+                } else if (m_state == PLAYING) {
+                    args.clear();
+                    m_route->SetParameter(m_blkFadeOut, BLKFADEOUT_PARAMID_TRIGGER_FADING, args);
+                }
+                break;
+
+            case 'r':  // Pitch High
+                if (m_pitch >= PITCH_MAX)
+                    break;
+                m_pitch = std::min(m_pitch * 1.01, PITCH_MAX);
+                args.clear();
+                args.push_back(std::to_string(m_pitch));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
+                break;
+
+            case 'f':  // Pitch Low
+                if (m_pitch <= PITCH_MIN)
+                    break;
+                m_pitch = std::max(m_pitch * 0.99, PITCH_MIN);
+                args.clear();
+                args.push_back(std::to_string(m_pitch));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
+                break;
+
+            case 'v':  // Pitch Reset
+                m_pitch = 1.0;
+                args.clear();
+                args.push_back(std::to_string(m_pitch));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
+                break;
+
+            case 't':  // Tempo Fast
+                if (m_tempo >= TEMPO_MAX)
+                    break;
+                m_tempo = std::min(m_tempo * 1.01, TEMPO_MAX);
+                args.clear();
+                args.push_back(std::to_string(m_tempo));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
+                break;
+
+            case 'g':  // Tempo Slow
+                if (m_tempo <= TEMPO_MIN)
+                    break;
+                m_tempo = std::max(m_tempo * 0.99, TEMPO_MIN);
+                args.clear();
+                args.push_back(std::to_string(m_tempo));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
+                break;
+
+            case 'b':  // Tempo Reset
+                m_tempo = 1.0;
+                args.clear();
+                args.push_back(std::to_string(m_tempo));
+                m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
+                break;
+
+            case 'e':  // Balance Right
+                if (m_chNum == 1)
+                    break;
+                if (m_volR < 1.0) {
+                    m_volR = std::min(m_volR + 0.01, 1.0);
+                    args.clear();
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                    m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                } else { // m_volR == 1.0
+                    if (m_volL == 0.0)
+                        break;
+                    m_volL = std::max(m_volL - 0.01, 0.0);
+                    args.clear();
+                    args.push_back("0");
+                    args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                    m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                }
+                break;
+
+            case 'q':  // Balance Left
+                if (m_chNum == 1)
+                    break;
+                if (m_volL < 1.0) {
+                    m_volL = std::min(m_volL + 0.01, 1.0);
+                    args.clear();
+                    args.push_back("0");
+                    args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                    m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                } else { // m_volL == 1.0
+                    if (m_volR == 0.0)
+                        break;
+                    m_volR = std::max(m_volR - 0.01, 0.0);
+                    args.clear();
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                    m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                }
+                break;
+
+            case 'w':  // Balance Mid
+                if (m_chNum == 1)
+                    break;
+                if (m_volL == 1.0 && m_volR == 1.0)
+                    break;
+                m_volL = m_volR = 1.0;
+                args.clear();
+                args.push_back("0");
+                args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                if (m_chNum == 2) {
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                }
+                m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                break;
+
+            case 'd':  // Mute/Unmute
+                m_mute = !m_mute;
+                args.clear();
+                args.push_back("0");
+                args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                if (m_chNum == 2) {
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
+                }
+                m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                break;
+
+            case 'a':  // Volume Down
+                if (m_volMaster == 0.0)
+                    break;
+                m_volMaster = std::max(m_volMaster - 0.01, 0.0);
+                m_mute = (m_volMaster == 0.0);
+                args.clear();
+                args.push_back("0");
+                args.push_back(std::to_string(m_volL * m_volMaster));
+                if (m_chNum == 2) {
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster));
+                }
+                m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                break;
+
+            case 's':  // Volume Up
+                if (m_volMaster == 1.0)
+                    break;
+                m_volMaster = std::min(m_volMaster + 0.01, 1.0);
+                m_mute = (m_volMaster == 0.0);
+                args.clear();
+                args.push_back("0");
+                args.push_back(std::to_string(m_volL * m_volMaster));
+                if (m_chNum == 2) {
+                    args.push_back("1");
+                    args.push_back(std::to_string(m_volR * m_volMaster));
+                }
+                m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
+                break;
+
+            default:
+                break;
+            }
+
+        } else if (msg.id == Message::ON_STOPPED) {
+            m_state = STOPPED;
+            this->RefreshDisplay(-1);
+
+        } else if (msg.id == Message::ON_STARTED) {
+            m_state = PLAYING;
+            this->RefreshDisplay(-1);
+        }
+    }
+}
+
+void Player::MessageHandler(Player *player)
+{
+    player->MsgHdl();
 }
 
 void Player::Usage() const
@@ -379,9 +589,15 @@ int Player::Go(int argc, char *argv[])
     lark::Lark &lk = lark::Lark::Instance();
     KLOG_DISABLE_OPTIONS(KLOGGING_TO_STDOUT | KLOGGING_TO_STDERR);
 
+    m_msgQ = lk.NewFIFO(0, sizeof(struct Message), 1024);
+    if (!m_msgQ) {
+        CONSOLE_PRINT("Failed to create fifo");
+        return -1;
+    }
+
     // Create the playback route named RouteA
-    lark::Route *route = lk.NewRoute("RouteA", this);
-    if (!route) {
+    m_route = lk.NewRoute("RouteA", this);
+    if (!m_route) {
         CONSOLE_PRINT("Failed to create route");
         return -1;
     }
@@ -393,29 +609,29 @@ int Player::Go(int argc, char *argv[])
     producer->SetBlocking(true);
     args.clear();
     args.push_back(std::to_string((unsigned long)producer));
-    lark::Block *blkStreamIn = route->NewBlock(soFileName, true, false, args);
+    lark::Block *blkStreamIn = m_route->NewBlock(soFileName, true, false, args);
     if (!blkStreamIn) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
 
     soFileName = "libblkfadein" SUFFIX;
-    lark::Block *blkFadeIn = route->NewBlock(soFileName, false, false);
+    lark::Block *blkFadeIn = m_route->NewBlock(soFileName, false, false);
     if (!blkFadeIn) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     args.clear();
     args.push_back(std::to_string(0.5)); // 0.5s to fade in
-    route->SetParameter(blkFadeIn, BLKFADEIN_PARAMID_FADING_TIME, args);
+    m_route->SetParameter(blkFadeIn, BLKFADEIN_PARAMID_FADING_TIME, args);
 
     soFileName = "libblkgain" SUFFIX;
-    lark::Block *blkGain = route->NewBlock(soFileName, false, false);
-    if (!blkGain) {
+    m_blkGain = m_route->NewBlock(soFileName, false, false);
+    if (!m_blkGain) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     args.clear();
@@ -425,167 +641,167 @@ int Player::Go(int argc, char *argv[])
         args.push_back("1");
         args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
     }
-    route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
+    m_route->SetParameter(m_blkGain, BLKGAIN_PARAMID_GAIN, args);
 
     lark::Block *blkDeinterleave = nullptr;
     lark::Block *blkInterleave = nullptr;
     if (m_chNum == 2) {
         soFileName = "libblkdeinterleave" SUFFIX;
-        blkDeinterleave = route->NewBlock(soFileName, false, false);
+        blkDeinterleave = m_route->NewBlock(soFileName, false, false);
         if (!blkDeinterleave) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
 
         soFileName = "libblkinterleave" SUFFIX;
-        blkInterleave = route->NewBlock(soFileName, false, false);
+        blkInterleave = m_route->NewBlock(soFileName, false, false);
         if (!blkInterleave) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
     }
 
     soFileName = "libblkformatadapter" SUFFIX;
-    lark::Block *blkFormatAdapter = route->NewBlock(soFileName, false, false);
+    lark::Block *blkFormatAdapter = m_route->NewBlock(soFileName, false, false);
     if (!blkFormatAdapter) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
 
     soFileName = "libblksoundtouch" SUFFIX;
-    lark::Block *blkSoundTouch = route->NewBlock(soFileName, false, false);
-    if (!blkSoundTouch) {
+    m_blkSoundTouch = m_route->NewBlock(soFileName, false, false);
+    if (!m_blkSoundTouch) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     args.clear();
     args.push_back(std::to_string(m_pitch));
-    route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
+    m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
     args.clear();
     args.push_back(std::to_string(m_tempo));
-    route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
+    m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
 
     soFileName = "libblkformatadapter" SUFFIX;
-    lark::Block *blkFormatAdapter1 = route->NewBlock(soFileName, false, false);
+    lark::Block *blkFormatAdapter1 = m_route->NewBlock(soFileName, false, false);
     if (!blkFormatAdapter1) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
 
     soFileName = "libblkfadeout" SUFFIX;
-    lark::Block *blkFadeOut = route->NewBlock(soFileName, false, false);
-    if (!blkFadeOut) {
+    m_blkFadeOut = m_route->NewBlock(soFileName, false, false);
+    if (!m_blkFadeOut) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     args.clear();
     args.push_back(std::to_string(0.2)); // 0.2s to fade out
-    route->SetParameter(blkFadeOut, BLKFADEOUT_PARAMID_FADING_TIME, args);
+    m_route->SetParameter(m_blkFadeOut, BLKFADEOUT_PARAMID_FADING_TIME, args);
 
     lark::Block *blkOutput = nullptr;
     switch (output) {
     case PORTAUDIO:
         soFileName = "libblkpaplayback" SUFFIX;
-        blkOutput = route->NewBlock(soFileName, false, true);
+        blkOutput = m_route->NewBlock(soFileName, false, true);
         break;
     case ALSA:
         soFileName = "libblkalsaplayback" SUFFIX;
-        blkOutput = route->NewBlock(soFileName, false, true);
+        blkOutput = m_route->NewBlock(soFileName, false, true);
         break;
     case TINYALSA:
         soFileName = "libblktinyalsaplayback" SUFFIX;
-        blkOutput = route->NewBlock(soFileName, false, true);
+        blkOutput = m_route->NewBlock(soFileName, false, true);
         break;
     case STDOUT:
         soFileName = "libblkfilewriter" SUFFIX;
         args.clear();
         args.push_back("--"); // stdout
-        blkOutput = route->NewBlock(soFileName, false, true, args);
+        blkOutput = m_route->NewBlock(soFileName, false, true, args);
         break;
     case NULLDEV:
         soFileName = "libblkfilewriter" SUFFIX;
         args.clear();
         args.push_back("/dev/null");
-        blkOutput = route->NewBlock(soFileName, false, true, args);
+        blkOutput = m_route->NewBlock(soFileName, false, true, args);
         break;
     default:
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     if (!blkOutput) {
         CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
 
     // Create RouteA's links
-    if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFormatAdapter, 0)) {
+    if (!m_route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkStreamIn, 0, blkFormatAdapter, 0)) {
         CONSOLE_PRINT("Failed to new a link");
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
-    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFormatAdapter, 0, blkFadeIn, 0)) {
+    if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFormatAdapter, 0, blkFadeIn, 0)) {
         CONSOLE_PRINT("Failed to new a link");
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
     if (m_chNum == 2) { // stereo
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFadeIn, 0, blkDeinterleave, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFadeIn, 0, blkDeinterleave, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 0, blkGain, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 0, m_blkGain, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 1, blkGain, 1)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkDeinterleave, 1, m_blkGain, 1)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 0, blkInterleave, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, m_blkGain, 0, blkInterleave, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 1, blkInterleave, 1)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, m_blkGain, 1, blkInterleave, 1)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkInterleave, 0, blkSoundTouch, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkInterleave, 0, m_blkSoundTouch, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
     } else { // mono
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkFadeIn, 0, blkGain, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkFadeIn, 0, m_blkGain, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, blkGain, 0, blkSoundTouch, 0)) {
+        if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, 1, frameSizeInSamples, m_blkGain, 0, m_blkSoundTouch, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
     }
-    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkSoundTouch, 0, blkFadeOut, 0)) {
+    if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, m_blkSoundTouch, 0, m_blkFadeOut, 0)) {
         CONSOLE_PRINT("Failed to new a link");
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
-    if (!route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, blkFadeOut, 0, blkFormatAdapter1, 0)) {
+    if (!m_route->NewLink(rate, lark::SampleFormat_FLOAT, m_chNum, frameSizeInSamples, m_blkFadeOut, 0, blkFormatAdapter1, 0)) {
         CONSOLE_PRINT("Failed to new a link");
-        lk.DeleteRoute(route);
+        lk.DeleteRoute(m_route);
         return -1;
     }
 
@@ -593,40 +809,40 @@ int Player::Go(int argc, char *argv[])
         soFileName = "libblkfilewriter" SUFFIX;
         args.clear();
         args.push_back(savingFile);
-        lark::Block *blkFileWriter = route->NewBlock(soFileName, false, true, args);
+        lark::Block *blkFileWriter = m_route->NewBlock(soFileName, false, true, args);
         if (!blkFileWriter) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
 
         soFileName = "libblkduplicator" SUFFIX;
-        lark::Block *blkDuplicator = route->NewBlock(soFileName, false, false);
+        lark::Block *blkDuplicator = m_route->NewBlock(soFileName, false, false);
         if (!blkDuplicator) {
             CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
 
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkDuplicator, 0)) {
+        if (!m_route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkDuplicator, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 0, blkOutput, 0)) {
+        if (!m_route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 1, blkFileWriter, 0)) {
+        if (!m_route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkDuplicator, 1, blkFileWriter, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
     } else {
-        if (!route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkOutput, 0)) {
+        if (!m_route->NewLink(rate, format, m_chNum, frameSizeInSamples, blkFormatAdapter1, 0, blkOutput, 0)) {
             CONSOLE_PRINT("Failed to new a link");
-            lk.DeleteRoute(route);
+            lk.DeleteRoute(m_route);
             return -1;
         }
     }
@@ -647,6 +863,15 @@ int Player::Go(int argc, char *argv[])
             "*************************************************************************************************************");
     }
 
+    std::thread t1(MessageHandler, this);
+
+    // Start
+    if (m_route->Start() < 0) {
+        CONSOLE_PRINT("Failed to start route");
+        lk.DeleteRoute(m_route);
+        return -1;
+    }
+
     struct termios attr;
     tcgetattr(0, &attr);
     attr.c_lflag &= ~(ICANON | ECHO);
@@ -654,199 +879,19 @@ int Player::Go(int argc, char *argv[])
     attr.c_cc[VMIN] = 1;
     tcsetattr(0, TCSANOW, &attr);
 
-    // Start
-    if (route->Start() < 0) {
-        CONSOLE_PRINT("Failed to start route");
-        lk.DeleteRoute(route);
-        return -1;
-    }
-
     while (1) {
-        this->RefreshDisplay(-1);
-
-        int key = getchar();
-
-        if (key == 'c') // Exit
+        Message msg = {
+            .id = Message::ON_KEY,
+            .key = (char)getchar()
+        };
+        m_msgQ->Consume(&msg, 1, -1);
+        if (msg.key == 'c')
             break;
-
-        switch (key) {
-        case 'z':  // Seek to Begin
-            m_wav.SeekToBegin();
-            break;
-
-        case 'x': { // Play/Stop
-            bool toPlay = false;
-
-            m_mutex.lock();
-            if (m_state == STOPPED) {
-                toPlay = true;
-            } else if (m_state == PLAYING) {
-                toPlay = false;
-            }
-            m_mutex.unlock();
-            if (toPlay) {
-                route->Start();
-            } else {
-                args.clear();
-                route->SetParameter(blkFadeOut, BLKFADEOUT_PARAMID_TRIGGER_FADING, args);
-            }
-            break;
-        }
-
-        case 'r':  // Pitch High
-            if (m_pitch >= PITCH_MAX)
-                break;
-            m_pitch = std::min(m_pitch * 1.01, PITCH_MAX);
-            args.clear();
-            args.push_back(std::to_string(m_pitch));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
-            break;
-
-        case 'f':  // Pitch Low
-            if (m_pitch <= PITCH_MIN)
-                break;
-            m_pitch = std::max(m_pitch * 0.99, PITCH_MIN);
-            args.clear();
-            args.push_back(std::to_string(m_pitch));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
-            break;
-
-        case 'v':  // Pitch Reset
-            m_pitch = 1.0;
-            args.clear();
-            args.push_back(std::to_string(m_pitch));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
-            break;
-
-        case 't':  // Tempo Fast
-            if (m_tempo >= TEMPO_MAX)
-                break;
-            m_tempo = std::min(m_tempo * 1.01, TEMPO_MAX);
-            args.clear();
-            args.push_back(std::to_string(m_tempo));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
-            break;
-
-        case 'g':  // Tempo Slow
-            if (m_tempo <= TEMPO_MIN)
-                break;
-            m_tempo = std::max(m_tempo * 0.99, TEMPO_MIN);
-            args.clear();
-            args.push_back(std::to_string(m_tempo));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
-            break;
-
-        case 'b':  // Tempo Reset
-            m_tempo = 1.0;
-            args.clear();
-            args.push_back(std::to_string(m_tempo));
-            route->SetParameter(blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
-            break;
-
-        case 'e':  // Balance Right
-            if (m_chNum == 1)
-                break;
-            if (m_volR < 1.0) {
-                m_volR = std::min(m_volR + 0.01, 1.0);
-                args.clear();
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
-                route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            } else { // m_volR == 1.0
-                if (m_volL == 0.0)
-                    break;
-                m_volL = std::max(m_volL - 0.01, 0.0);
-                args.clear();
-                args.push_back("0");
-                args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
-                route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            }
-            break;
-
-        case 'q':  // Balance Left
-            if (m_chNum == 1)
-                break;
-            if (m_volL < 1.0) {
-                m_volL = std::min(m_volL + 0.01, 1.0);
-                args.clear();
-                args.push_back("0");
-                args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
-                route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            } else { // m_volL == 1.0
-                if (m_volR == 0.0)
-                    break;
-                m_volR = std::max(m_volR - 0.01, 0.0);
-                args.clear();
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
-                route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            }
-            break;
-
-        case 'w':  // Balance Mid
-            if (m_chNum == 1)
-                break;
-            if (m_volL == 1.0 && m_volR == 1.0)
-                break;
-            m_volL = m_volR = 1.0;
-            args.clear();
-            args.push_back("0");
-            args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
-            if (m_chNum == 2) {
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
-            }
-            route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            break;
-
-        case 'd':  // Mute/Unmute
-            m_mute = !m_mute;
-            args.clear();
-            args.push_back("0");
-            args.push_back(std::to_string(m_volL * m_volMaster * (m_mute ? 0.0 : 1.0)));
-            if (m_chNum == 2) {
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster * (m_mute ? 0.0 : 1.0)));
-            }
-            route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            break;
-
-        case 'a':  // Volume Down
-            if (m_volMaster == 0.0)
-                break;
-            m_volMaster = std::max(m_volMaster - 0.01, 0.0);
-            m_mute = (m_volMaster == 0.0);
-            args.clear();
-            args.push_back("0");
-            args.push_back(std::to_string(m_volL * m_volMaster));
-            if (m_chNum == 2) {
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster));
-            }
-            route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            break;
-
-        case 's':  // Volume Up
-            if (m_volMaster == 1.0)
-                break;
-            m_volMaster = std::min(m_volMaster + 0.01, 1.0);
-            m_mute = (m_volMaster == 0.0);
-            args.clear();
-            args.push_back("0");
-            args.push_back(std::to_string(m_volL * m_volMaster));
-            if (m_chNum == 2) {
-                args.push_back("1");
-                args.push_back(std::to_string(m_volR * m_volMaster));
-            }
-            route->SetParameter(blkGain, BLKGAIN_PARAMID_GAIN, args);
-            break;
-
-        default:
-            break;
-        }
     }
 
-    lk.DeleteRoute(route);
+    t1.join();
+
+    lk.DeleteRoute(m_route);
 
     CONSOLE_PRINT("");
 
@@ -856,27 +901,24 @@ int Player::Go(int argc, char *argv[])
 void Player::OnStarted()
 {
     // Triggered from user
-    // No lock needed
-    m_state = PLAYING;
-    this->RefreshDisplay(-1);
+
+    Message msg = {
+        .id = Message::ON_STARTED
+    };
+    m_msgQ->Consume(&msg, 1, -1);
 }
 
 void Player::OnStopped(lark::Route::StopReason reason)
 {
-    if (reason != lark::Route::USER_STOP) { // Triggered from lark route
-        m_mutex.lock();
-    } else { // Triggered from user
-        // No lock needed
-    }
-
-    m_state = STOPPED;
-    this->RefreshDisplay(-1);
+    Message msg = {
+        .id = Message::ON_STOPPED
+    };
+    m_msgQ->Consume(&msg, 1, -1);
 
     if (reason != lark::Route::USER_STOP) { // Triggered from lark route
-        m_wav.SeekToBegin();
-        m_mutex.unlock();
-    } else { // Triggered from user
-        // No unlock needed
+        msg.id = Message::ON_KEY,
+        msg.key = 'z'; // Seek to Begin
+        m_msgQ->Consume(&msg, 1, -1);
     }
 }
 
