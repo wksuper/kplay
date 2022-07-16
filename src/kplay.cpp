@@ -197,6 +197,9 @@ private:
 
     WavFile m_wav;
 
+    enum Mode { NORMAL, REPEAT, NONINTERACTIVE };
+    Mode m_mode = Mode::NORMAL;
+
     double m_pitch = 1.0;
     const double PITCH_MIN = 0.1;
     const double PITCH_MAX = 100.0;
@@ -461,7 +464,7 @@ void Player::Usage() const
         "\n"
         "Copyright (C) 2022  Kui Wang\n"
         "\n"
-        "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-v VOLUME] [-p PITCH] [-t TEMPO] [-h] WAVFILE\n"
+        "Usage: kplay [-o OUTPUT] [-s SAVINGFILE] [-m MODE] [-v VOLUME] [-p PITCH] [-t TEMPO] [-h] WAVFILE\n"
         "\n"
         "Mandatory argument\n"
         "WAVFILE                    The wav file to play\n"
@@ -470,6 +473,10 @@ void Player::Usage() const
         "-o OUTPUT                  One of portaudio|alsa|tinyalsa|stdout|null\n"
         "                           that audio will output to (default portaudio)\n"
         "-s SAVINGFILE              The file that audio will be saved to while playback\n"
+        "-m MODE                    One of normal|repeat|noninteractive (default normal)\n"
+        "                               normal: stop playback when reach EOF\n"
+        "                               repeat: re-start playback when reach EOF\n"
+        "                               noninteractive: ignore user keys and exit program when reach EOF\n"
         "-v VOLUME                  The initial volume (default 1.0)\n"
         "-p PITCH                   The initial pitch (default 1.0)\n"
         "-t TEMPO                   The initial tempo (default 1.0)\n"
@@ -485,7 +492,7 @@ int Player::Go(int argc, char *argv[])
 
     std::string savingFile;
     Output output = PORTAUDIO;
-    for (int ch = -1; (ch = getopt(argc, argv, "o:s:v:p:t:h")) != -1; ) {
+    for (int ch = -1; (ch = getopt(argc, argv, "o:s:m:v:p:t:h")) != -1; ) {
         switch (ch) {
         case 'o':
             if (strcmp(optarg, "stdout") == 0) {
@@ -500,12 +507,23 @@ int Player::Go(int argc, char *argv[])
                 output = NULLDEV;
             } else {
                 CONSOLE_PRINT("Invalid -o argument: %s", optarg);
-                CONSOLE_PRINT("Supported -o arguments: portaudio, alsa, tinyalsa, stdout, null");
                 return -1;
             }
             break;
         case 's':
             savingFile = optarg;
+            break;
+        case 'm':
+            if (strcmp(optarg, "normal") == 0) {
+                m_mode = Mode::NORMAL;
+            } else if (strcmp(optarg, "repeat") == 0) {
+                m_mode = Mode::REPEAT;
+            } else if (strcmp(optarg, "noninteractive") == 0) {
+                m_mode = Mode::NONINTERACTIVE;
+            } else {
+                CONSOLE_PRINT("Invalid -m argument: %s", optarg);
+                return -1;
+            }
             break;
         case 'v':
             m_volMaster = atof(optarg);
@@ -847,20 +865,29 @@ int Player::Go(int argc, char *argv[])
         }
     }
 
-    if (m_chNum == 2) {
+    if (m_mode == Mode::NONINTERACTIVE) {
         CONSOLE_PRINT(
-            "*************************************************************************************************************\n"
-            "* [q] Balance Left   [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
-            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
-            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
-            "*************************************************************************************************************");
+                "*************************************************************************************************************\n"
+                "*                                                                                           |   K P L A Y   *\n"
+                "*                                                                                           | P O W E R E D *\n"
+                "*                                                                                           | B Y   L A R K *\n"
+                "*************************************************************************************************************");
     } else {
-        CONSOLE_PRINT(
-            "*************************************************************************************************************\n"
-            "*                                                        [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
-            "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
-            "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
-            "*************************************************************************************************************");
+        if (m_chNum == 2) {
+            CONSOLE_PRINT(
+                "*************************************************************************************************************\n"
+                "* [q] Balance Left   [w] Balance Mid  [e] Balance Right  [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
+                "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
+                "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
+                "*************************************************************************************************************");
+        } else {
+            CONSOLE_PRINT(
+                "*************************************************************************************************************\n"
+                "*                                                        [r] Pitch High   [t] Tempo Fast    |   K P L A Y   *\n"
+                "* [a] Volume Down    [s] Volume Up    [d] Mute/Unmute    [f] Pitch Low    [g] Tempo Slow    | P O W E R E D *\n"
+                "* [z] Seek to Begin  [x] Play/Stop    [c] Exit           [v] Pitch Reset  [b] Tempo Reset   | B Y   L A R K *\n"
+                "*************************************************************************************************************");
+        }
     }
 
     std::thread t1(MessageHandler, this);
@@ -879,14 +906,19 @@ int Player::Go(int argc, char *argv[])
     attr.c_cc[VMIN] = 1;
     tcsetattr(0, TCSANOW, &attr);
 
-    while (1) {
-        Message msg = {
-            .id = Message::ON_KEY,
-            .key = (char)getchar()
-        };
-        m_msgQ->Consume(&msg, 1, -1);
-        if (msg.key == 'c')
-            break;
+    if (m_mode != Mode::NONINTERACTIVE) {
+        while (1) {
+            int key = getchar();
+            if (key < 0)
+                break;
+            Message msg = {
+                .id = Message::ON_KEY,
+                .key = (char)key
+            };
+            m_msgQ->Consume(&msg, 1, -1);
+            if (msg.key == 'c')
+                break;
+        }
     }
 
     t1.join();
@@ -910,15 +942,16 @@ void Player::OnStarted()
 
 void Player::OnStopped(lark::Route::StopReason reason)
 {
-    Message msg = {
-        .id = Message::ON_STOPPED
-    };
-    m_msgQ->Consume(&msg, 1, -1);
+    Message msg[2];
+    msg[0].id = Message::ON_STOPPED;
+    m_msgQ->Consume(msg, 1, -1);
 
     if (reason != lark::Route::USER_STOP) { // Triggered from lark route
-        msg.id = Message::ON_KEY,
-        msg.key = 'z'; // Seek to Begin
-        m_msgQ->Consume(&msg, 1, -1);
+        msg[0].id = Message::ON_KEY,
+        msg[0].key = 'z'; // Seek to Begin
+        msg[1].id = Message::ON_KEY,
+        msg[1].key = (m_mode == Mode::REPEAT) ? 'x' : 'c'; // Play or Exit
+        m_msgQ->Consume(msg, (m_mode == Mode::NORMAL) ? 1 : 2, -1);
     }
 }
 
