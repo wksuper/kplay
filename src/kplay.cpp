@@ -226,12 +226,21 @@ int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t
     long cur = m_fin.tellg();
     m_player->RefreshDisplay((cur - sizeof(struct wav_header)) * 10000 / m_pcmBytes);
 
+    const size_t requestBytes = m_sampleSize * samples;
+
     std::lock_guard<std::mutex> _l(m_mutex);
-    if (m_fin.read((char *)data, m_sampleSize * samples))
+    if (m_fin.read((char *)data, requestBytes))
         return samples;
     else {
-        m_player->RefreshDisplay(10000);
-        return lark::E_EOF;
+        std::streamsize read = m_fin.gcount();
+        if (read > 0) {
+            // last frame
+            memset((char *)data + read, 0,  requestBytes - read);
+            return samples;
+        } else {
+            m_player->RefreshDisplay(10000);
+            return lark::E_EOF;
+        }
     }
 }
 
@@ -359,7 +368,7 @@ int Player::Go(int argc, char *argv[])
         format = lark::SampleFormat_S16;
         break;
     default:
-        CONSOLE_PRINT("%u bits is not supported", header.bits_per_sample);
+        CONSOLE_PRINT("%u-bit is not supported", header.bits_per_sample);
         return -1;
     }
     m_chNum = header.num_channels;
