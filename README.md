@@ -12,8 +12,10 @@ Main features
 - Left right channel balance adjustment
 - Pitch adjustment
 - Tempo adjustment
+- Repeat playback
 - Saving output to file
-- Cross platform (Works well on GNU-Linux and MacOS)
+- Support noninteractive mode (goes for command line batch processing)
+- Cross-platform (works well on GNU-Linux and MacOS)
 
 ## Dependency
 
