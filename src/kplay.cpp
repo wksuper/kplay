@@ -221,7 +221,7 @@ private:
     State m_state = STOPPED;
 
     struct Message {
-        enum ID { ON_KEY, ON_STOPPED, ON_STARTED };
+        enum ID { ON_KEY, ON_STOPPED, ON_STARTED, EXIT };
         ID id;
         char key;
     };
@@ -273,10 +273,15 @@ void Player::MsgHdl()
         m_msgQ->Produce(&msg, 1, nullptr);
 
         if (msg.id == Message::ON_KEY) {
-            if (msg.key == 'c') // Exit
+            switch (msg.key) {
+            case 'c':  // Prepare for exit
+                // In m_route->Stop(), m_msgQ will be inserted
+                // the ON_STOPPED before m_route->Stop() returns
+                m_route->Stop();
+                msg.id = Message::EXIT;
+                m_msgQ->Consume(&msg, 1, -1);
                 break;
 
-            switch (msg.key) {
             case 'z':  // Seek to Begin
                 m_wav.SeekToBegin();
                 break;
@@ -449,6 +454,9 @@ void Player::MsgHdl()
         } else if (msg.id == Message::ON_STARTED) {
             m_state = PLAYING;
             this->RefreshDisplay(-1);
+
+        } else if (msg.id == Message::EXIT) {
+            break;
         }
     }
 }
@@ -478,7 +486,7 @@ void Player::Usage() const
         "                               normal: stop playback when reach EOF\n"
         "                               repeat: re-start playback when reach EOF\n"
         "                               noninteractive: ignore user keys and exit program when reach EOF\n"
-        "-s                         Silent logging\n"
+        "-s                         Silent console printing\n"
         "-v VOLUME                  The initial volume (default 1.0)\n"
         "-p PITCH                   The initial pitch (default 1.0)\n"
         "-t TEMPO                   The initial tempo (default 1.0)\n"
@@ -915,7 +923,7 @@ int Player::Go(int argc, char *argv[])
         while (1) {
             int key = getchar();
             if (key < 0)
-                break;
+                key = 'c';
             Message msg = {
                 .id = Message::ON_KEY,
                 .key = (char)key
