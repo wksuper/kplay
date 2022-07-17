@@ -5,6 +5,7 @@ add_executable(kplay
 target_link_libraries(kplay
     lark
     klogging
+    pthread
 )
 
 install(
