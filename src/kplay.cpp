@@ -705,16 +705,21 @@ int Player::Go(int argc, char *argv[])
     soFileName = "libblksoundtouch" SUFFIX;
     m_blkSoundTouch = m_route->NewBlock(soFileName, false, false);
     if (!m_blkSoundTouch) {
-        CONSOLE_PRINT("Failed to new a block from %s", soFileName);
-        lk.DeleteRoute(m_route);
-        return -1;
+        CONSOLE_PRINT("Warning: Failed to new a block from %s, PITCH/TEMPO tuning won't take effect", soFileName);
+        soFileName = "libblkpassthrough" SUFFIX;
+        m_blkSoundTouch = m_route->NewBlock(soFileName, false, false);
+        if (!m_blkSoundTouch) {
+            CONSOLE_PRINT("Failed to new a block from %s", soFileName);
+            return -1;
+        }
+    } else {
+        args.clear();
+        args.push_back(std::to_string(m_pitch));
+        m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
+        args.clear();
+        args.push_back(std::to_string(m_tempo));
+        m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
     }
-    args.clear();
-    args.push_back(std::to_string(m_pitch));
-    m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_PITCH, args);
-    args.clear();
-    args.push_back(std::to_string(m_tempo));
-    m_route->SetParameter(m_blkSoundTouch, BLKSOUNDTOUCH_PARAMID_TEMPO, args);
 
     soFileName = "libblkformatadapter" SUFFIX;
     lark::Block *blkFormatAdapter1 = m_route->NewBlock(soFileName, false, false);
