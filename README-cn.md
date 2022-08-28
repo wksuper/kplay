@@ -47,12 +47,11 @@ $ sudo apt-get install libtinyalsa-dev
 ## 编译和安装
 
 ```bash
-$ cd kplay
-$ mkdir build && cd build
-$ cmake ..
-$ make
-$ sudo make install
-$ sudo ldconfig
+cd kplay
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build .
+cmake --install .
 ```
 
 ## 运行时截图

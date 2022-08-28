@@ -47,12 +47,11 @@ $ sudo apt-get install libtinyalsa-dev
 ## Build and Install
 
 ```bash
-$ cd kplay
-$ mkdir build && cd build
-$ cmake ..
-$ make
-$ sudo make install
-$ sudo ldconfig
+cd kplay
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build .
+cmake --install .
 ```
 
 ## Running Screenshot
