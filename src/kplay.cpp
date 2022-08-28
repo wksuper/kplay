@@ -161,17 +161,17 @@ public:
     Player() : m_wav(this) { }
     int Go(int argc, char *argv[]);
 
-    void RefreshDisplay(long progress) const
+    void RefreshDisplay(int64_t progress) const
     {
-        static long s_progress;
+        static int64_t s_progress;
 
         if (progress >= 0)
             s_progress = progress;
         char prog[8];
         if (s_progress == 0 || s_progress == 10000) {
-            snprintf(prog, sizeof(prog), "%5lu%%", s_progress / 100);
+            snprintf(prog, sizeof(prog), "%5lld%%", s_progress / 100);
         } else {
-            snprintf(prog, sizeof(prog), "%2lu.%02lu%%", s_progress / 100, s_progress % 100);
+            snprintf(prog, sizeof(prog), "%2lld.%02lld%%", s_progress / 100, s_progress % 100);
         }
 
         if (m_chNum == 2) {
@@ -245,7 +245,7 @@ int WavFile::Produce(void *data, lark::samples_t samples, bool blocking, int64_t
     std::lock_guard<std::mutex> _l(m_mutex);
 
     long cur = m_fin.tellg();
-    m_player->RefreshDisplay((cur - sizeof(struct wav_header)) * 10000 / m_pcmBytes);
+    m_player->RefreshDisplay((int64_t)(cur - sizeof(struct wav_header)) * (int64_t)10000 / (int64_t)m_pcmBytes);
 
     if (m_fin.read((char *)data, requestBytes))
         return samples;
