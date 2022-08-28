@@ -23,25 +23,25 @@ kplay是一个纯控制台的可以实时调音的wav文件播放器。
 2. kplay运行时依赖于 ***SoundTouch*** 库。
 
 ```bash
-$ sudo apt-get install libsoundtouch-dev
+sudo apt install libsoundtouch-dev
 ```
 
 3. 若使用`-o portaudio`（默认）选项运行kplay，则需要安装 ***portaudio*** 库。
 
 ```bash
-$ sudo apt-get install libportaudio2
+sudo apt install libportaudio2
 ```
 
 4. 若使用`-o alsa`选项运行kplay，则需要安装 ***alsa-lib*** 库。
 
 ```bash
-$ sudo apt-get install libasound2-dev
+sudo apt install libasound2-dev
 ```
 
 5. 若使用`-o tinyalsa`选项运行kplay，则需要安装 ***tinyalsa-lib*** 库。
 
 ```bash
-$ sudo apt-get install libtinyalsa-dev
+sudo apt install libtinyalsa-dev
 ```
 
 ## 编译和安装
@@ -51,7 +51,7 @@ cd kplay
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
-cmake --install .
+sudo cmake --install .
 ```
 
 ## 运行时截图

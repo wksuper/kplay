@@ -23,25 +23,25 @@ Main features
 2. The ***SoundTouch*** library is needed by kplay at runtime.
 
 ```bash
-$ sudo apt-get install libsoundtouch-dev
+sudo apt install libsoundtouch-dev
 ```
 
 3. If the option `-o portaudio` (default) is given to run kplay, then the ***portaudio*** library is needed.
 
 ```bash
-$ sudo apt-get install libportaudio2
+sudo apt install libportaudio2
 ```
 
 4. If the option `-o alsa` is given to run kplay, then the ***alsa-lib*** library is needed.
 
 ```bash
-$ sudo apt-get install libasound2-dev
+sudo apt install libasound2-dev
 ```
 
 5. If the option `-o tinyalsa` is given to run kplay, then the ***tinyalsa-lib*** library is needed.
 
 ```bash
-$ sudo apt-get install libtinyalsa-dev
+sudo apt install libtinyalsa-dev
 ```
 
 ## Build and Install
@@ -51,7 +51,7 @@ cd kplay
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
-cmake --install .
+sudo cmake --install .
 ```
 
 ## Running Screenshot
